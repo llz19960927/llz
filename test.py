@@ -185,7 +185,7 @@ def data_generator(file_paths, batch_size=128, input_len=50000):
 
 # In[3]:
 
-
+'''
 def amc_net(input_len=None):
     inputs = Input((input_len, 2), name="inputs")
     x = Conv1D(filters=64, kernel_size=40, activation="relu")(inputs)
@@ -220,6 +220,7 @@ def build_model(model):
     model.compile(loss='categorical_crossentropy', metrics=['accuracy'],optimizer=opt)
     
     return model
+'''
 '''
 
 CONV_BLOCK_COUNT = 0  # 用来命名计数卷积编号
@@ -426,7 +427,7 @@ class realTimePlot(Callback):
 # In[5]:
 
 
-def train(input_len=50000, batch_size=8, epochs=5):
+def train(input_len=50000, batch_size=10, epochs=5):
     real_epochs_num = 8192  # 实际每个epochs训练的信号数量
     train_path = "/home/wfy/all_sigdata_60g/"
     val_path = "/home/wfy/all_sigdata60g_val/"
