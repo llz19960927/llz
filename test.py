@@ -370,7 +370,7 @@ def build_model(model):
 # In[4]:
 
 
-get_ipython().run_line_magic('matplotlib', 'inline')
+#get_ipython().run_line_magic('matplotlib', 'inline')
 from IPython.display import display, clear_output
 import time
 
