@@ -427,7 +427,7 @@ class realTimePlot(Callback):
 # In[5]:
 
 
-def train(input_len=50000, batch_size=10, epochs=5):
+def train(input_len=50000, batch_size=16, epochs=5):
     real_epochs_num = 8192  # 实际每个epochs训练的信号数量
     train_path = "/home/wfy/all_sigdata_60g/"
     val_path = "/home/wfy/all_sigdata60g_val/"
