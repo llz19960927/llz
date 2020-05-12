@@ -11,7 +11,7 @@ from scipy import signal
 from prefetch_generator import background
 
 from keras.utils import multi_gpu_model
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 from keras.models import *
 from keras.layers import *
@@ -184,13 +184,13 @@ def data_generator(file_paths, batch_size=128, input_len=50000):
 
 
 # In[3]:
-
-'''
 def amc_net(input_len=None):
     inputs = Input((input_len, 2), name="inputs")
+    inputs_lstm = Lambda(lambda x: x[:,::5,:])(inputs)
+    #CNN分支
     x = Conv1D(filters=64, kernel_size=40, activation="relu")(inputs)
     x = BatchNormalization()(x)
-    x = Conv1D(filters=128, kernel_size=10, activation="relu")(inputs)
+    x = Conv1D(filters=128, kernel_size=10, activation="relu")(x)
     x = BatchNormalization()(x)
     x = identity_Block(x)
     x = identity_Block(x)
@@ -198,11 +198,12 @@ def amc_net(input_len=None):
     x = Dense(units=128, activation="relu")(x)
     #LSTM分支
     #y = LSTM(units=64 ,return_sequences=True)(inputs)
-    y = CuDNNLSTM(units=64,input_shape=(1000,2),return_sequences=True)(inputs)
+    y = CuDNNLSTM(units=128,return_sequences=True)(inputs_lstm)
     y = GlobalAveragePooling1D()(y)
     #融合特征
     z = concatenate([x, y], axis=1) 
     z = Dense(units=128, activation="relu")(z)
+    z = BatchNormalization()(z)
     z = Dense(units=len(raw_sig().all_classes), activation="softmax")(z)
     model = Model(inputs=inputs, outputs=z)
     return model
@@ -211,161 +212,14 @@ def identity_Block(inpt, with_conv_shortcut=False):
     x = Conv1D(filters=128, kernel_size=10, activation="relu", padding='same')(inpt)
     x = BatchNormalization()(x)
     x = Conv1D(filters=128, kernel_size=10, activation="relu", padding='same')(x)
-    x = BatchNormalization()(x) 
+    x = BatchNormalization()(x)
     x = add([x, inpt],)
     return x
 
 def build_model(model):
     opt = Adam(lr=0.0002, epsilon=1e-08)
     model.compile(loss='categorical_crossentropy', metrics=['accuracy'],optimizer=opt)
-    
     return model
-'''
-'''
-
-CONV_BLOCK_COUNT = 0  # 用来命名计数卷积编号
-INCEPTION_A_COUNT = 0
-INCEPTION_B_COUNT = 0
-INCEPTION_C_COUNT = 0
-def conv_block(x, nb_filters, nb_row, strides=1, padding='same', use_bias=False, name=None):
-    global CONV_BLOCK_COUNT
-    CONV_BLOCK_COUNT += 1
-    with K.name_scope('conv_block_'+str(CONV_BLOCK_COUNT)):
-        x = Conv1D(filters=nb_filters,
-                   kernel_size=nb_row,
-                   strides=strides,
-                   padding=padding,
-                   use_bias=use_bias,
-                   name=name)(x)
-        x = BatchNormalization(axis=-1, momentum=0.9997, scale=False)(x)
-        x = Activation("relu")(x)
-    return x
- 
-def stem(x_input):
-    with K.name_scope('stem'):
-        x = Conv1D(filters=64, kernel_size=40, activation="relu")(x_input)
-        x = BatchNormalization()(x)
-        x = Conv1D(filters=128, kernel_size=10, activation="relu")(x)
-        x = BatchNormalization()(x)
-        #x = Dropout(rate=0.3, name="dropout3")(x)
-        x = Conv1D(filters=128, kernel_size=10, activation="relu")(x)
-        x = BatchNormalization()(x)
-        
-    return x
- 
-def inception_A(x_input):
-    global INCEPTION_A_COUNT
-    INCEPTION_A_COUNT += 1
-    with K.name_scope('inception_A' + str(INCEPTION_A_COUNT)):
-        averagepooling_conv1x1 = MaxPooling1D(pool_size=10, strides=1, padding='same')(x_input)  # 35 * 35 * 192
-        averagepooling_conv1x1 = conv_block(averagepooling_conv1x1, 96, 1)  # 35 * 35 * 96
- 
-        conv1x1 = conv_block(x_input, 96, 1)  # 35 * 35 * 96
- 
-        conv1x1_3x3 = conv_block(x_input, 64, 1)  # 35 * 35 * 64
-        conv1x1_3x3 = conv_block(conv1x1_3x3, 96, 10)  # 35 * 35 * 96
- 
-        conv3x3_3x3 = conv_block(x_input, 64, 1)  # 35 * 35 * 64
-        conv3x3_3x3 = conv_block(conv3x3_3x3, 96, 10)  # 35 * 35 * 96
-        conv3x3_3x3 = conv_block(conv3x3_3x3, 96, 10)  # 35 * 35 * 96
- 
-        merged_vector = concatenate([averagepooling_conv1x1, conv1x1, conv1x1_3x3, conv3x3_3x3], axis=-1)  # 35 * 35 * 384
-    return merged_vector
- 
-def inception_B(x_input):
-    global INCEPTION_B_COUNT
-    INCEPTION_B_COUNT += 1
-    with K.name_scope('inception_B' + str(INCEPTION_B_COUNT)):
-        averagepooling_conv1x1 = AveragePooling1D(pool_size=10, strides=1, padding='same', name="inception_B1")(x_input)
-        averagepooling_conv1x1 = conv_block(averagepooling_conv1x1, 128, 1, name="inception_B2")
- 
-        conv1x1 = conv_block(x_input, 384, 1, name="inception_B3")
- 
-        conv1x7_1x7 = conv_block(x_input, 192, 1, name="inception_B4")
-        #conv1x7_1x7 = conv_block(conv1x7_1x7, 224, 7)
-        conv1x7_1x7 = conv_block(conv1x7_1x7, 256, 40, name="inception_B5")
- 
-        conv2_1x7_7x1 = conv_block(x_input, 192, 1, name="inception_B6")
-        conv2_1x7_7x1 = conv_block(conv2_1x7_7x1, 224, 40, name="inception_B7")
-        #conv2_1x7_7x1 = conv_block(conv2_1x7_7x1, 224, 7, 1)
-        conv2_1x7_7x1 = conv_block(conv2_1x7_7x1, 256, 40, name="inception_B8")
-        #conv2_1x7_7x1 = conv_block(conv2_1x7_7x1, 256, 7, 1)
- 
-        merged_vector = concatenate([averagepooling_conv1x1, conv1x1, conv1x7_1x7, conv2_1x7_7x1], axis=-1)
-    return merged_vector
- 
-def inception_C(x_input):
-    global INCEPTION_C_COUNT
-    INCEPTION_C_COUNT += 1
-    with K.name_scope('Inception_C' + str(INCEPTION_C_COUNT)):
-        averagepooling_conv1x1 = AveragePooling1D(pool_size=10, strides=1, padding='same', name="inception_C1")(x_input)
-        averagepooling_conv1x1 = conv_block(averagepooling_conv1x1, 256, 1, name="inception_C2")
- 
-        conv1x1 = conv_block(x_input, 256, 1, name="inception_C3")
- 
-        # 用 1x3 和 3x1 替代 3x3
-        conv3x3_1x1 = conv_block(x_input, 384, 1, name="inception_C4")
-        conv3x3_1 = conv_block(conv3x3_1x1, 256, 10, name="inception_C5")
-        #conv3x3_2 = conv_block(conv3x3_1x1, 256, 3, 1)
- 
-        conv2_3x3_1x1 = conv_block(x_input, 384, 1, name="inception_C6")
-        #conv2_3x3_1x1 = conv_block(conv2_3x3_1x1, 448, 3)
-        #conv2_3x3_1x1 = conv_block(conv2_3x3_1x1, 512, 3, 1)
-        conv2_3x3_1x1_1 = conv_block(conv2_3x3_1x1, 512, 10, name="inception_C7")
-        conv2_3x3_1x1_2 = conv_block(conv2_3x3_1x1_1, 256, 10, name="inception_C8")
-
-        merged_vector = concatenate([averagepooling_conv1x1, conv1x1, conv3x3_1, conv2_3x3_1x1_1], axis=-1)
-    return merged_vector
- 
-def reduction_A(x_input, k=192, l=224, m=256, n=384):
-    with K.name_scope('Reduction_A'):
-        maxpool = MaxPooling1D(pool_size=10, strides=4, padding='valid', name="reduction_A1")(x_input)
- 
-        conv3x3 = conv_block(x_input, n, 10, strides=4, padding='valid', name="reduction_A2")
- 
-        conv2_3x3 = conv_block(x_input, k, 1, name="reduction_A3")
-        conv2_3x3 = conv_block(conv2_3x3, l, 10, name="reduction_A4")
-        conv2_3x3 = conv_block(conv2_3x3, m, 10, strides=4, padding='valid', name="reduction_A5")
- 
-        merged_vector = concatenate([maxpool, conv3x3, conv2_3x3], axis=-1)
-    return merged_vector
- 
-def reduction_B(x_input):
-    with K.name_scope('Reduction_B'):
-        maxpool = MaxPooling1D(pool_size=10, strides=4, padding='valid', name="reduction_B1")(x_input)
- 
-        conv3x3 = conv_block(x_input, 192, 1, name="reduction_B2")
-        conv3x3 = conv_block(conv3x3, 192, 10, strides=4, padding='valid', name="reduction_B3")
- 
-        conv1x7_7x1_3x3 = conv_block(x_input, 256, 1, name="reduction_B4")
-        conv1x7_7x1_3x3 = conv_block(conv1x7_7x1_3x3, 320, 40, name="reduction_B5")
-       # conv1x7_7x1_3x3 = conv_block(conv1x7_7x1_3x3, 320, 7, 1)
-        conv1x7_7x1_3x3 = conv_block(conv1x7_7x1_3x3, 320, 10, strides=4, padding='valid', name="reduction_B6")
- 
-        merged_vector = concatenate([maxpool, conv3x3, conv1x7_7x1_3x3], axis=-1)
-    return merged_vector
- 
-
-
-def inception_v4_backbone(input_len=None):
-    x_input = Input((50000, 2))
-    x = stem(x_input)
-    x = inception_A(x)
-    x = inception_A(x)
-    x = inception_A(x)
-    #x = AveragePooling1D(pool_size=8)(x)
-    #x = Dropout(0.2)(x)
-    #x = Flatten()(x)
-    x = GlobalAveragePooling1D()(x)
-    x = Dense(units=len(raw_sig().all_classes), activation="softmax")(x)
-    model = Model(inputs=x_input, outputs=x, name='Inception-V4')
-    return model
-
-def build_model(model):
-    opt = Adam(lr=0.00002, epsilon=1e-08)
-    model.compile(loss='categorical_crossentropy', metrics=['accuracy'],optimizer=opt)
-    return model
-'''
 
 
 # In[4]:
@@ -429,8 +283,8 @@ class realTimePlot(Callback):
 
 def train(input_len=50000, batch_size=16, epochs=5):
     real_epochs_num = 8192  # 实际每个epochs训练的信号数量
-    train_path = "/home/wfy/all_sigdata_60g/"
-    val_path = "/home/wfy/all_sigdata60g_val/"
+    train_path = "/home/ljx/publicData/data60g/train/"
+    val_path = "/home/ljx/publicData/data60g/val/"
 
     train_files = [os.path.join(train_path, item) for item in os.listdir(train_path)]
     val_files = [os.path.join(val_path, item) for item in os.listdir(val_path)]
@@ -445,7 +299,7 @@ def train(input_len=50000, batch_size=16, epochs=5):
     
     data_train_gener = data_generator(train_files, batch_size=batch_size, input_len=input_len)
     data_val_gener = data_generator(val_files, batch_size=batch_size, input_len=input_len)
-
+    
     rtp = realTimePlot(title="AMC traininig process for input_length={}".format(input_len))
     
     model_path = "training_logs/models_60g_{}".format(input_len)
@@ -455,13 +309,13 @@ def train(input_len=50000, batch_size=16, epochs=5):
     cheack_path = ModelCheckpoint(model_path + "/test-best-ep{epoch:03d}-acc{acc:.3f}-val_acc{val_acc:.3f}.h5",
                                  save_best_only=True)
     
-    #model = build_model(amc_net())
-    model = load_model('/home/wfy/tank/training_logs/models_60g_50000/test-best-ep339-acc0.925-val_acc0.944.h5')
-    model.compile(loss='categorical_crossentropy', metrics=['accuracy'],optimizer=Adam(lr=0.00001, epsilon=1e-08))
+    #model = load_model('/home/wfy/tank/training_logs/models_60g_50000/test-best-ep339-acc0.925-val_acc0.944.h5')
+    #model.compile(loss='categorical_crossentropy', metrics=['accuracy'],optimizer=Adam(lr=0.00001, epsilon=1e-08))
+    model = build_model(amc_net())
     model.summary()
     #parallel_model = multi_gpu_model(model, gpus=2)
     #model.compile(loss='categorical_crossentropy', metrics=['accuracy'],optimizer=Adam(lr=0.00002, epsilon=1e-08))
-
+    
     history = model.fit_generator(
                         data_train_gener,
                         steps_per_epoch=train_steps,
@@ -473,4 +327,3 @@ def train(input_len=50000, batch_size=16, epochs=5):
     np.save("training_logs//test_train_log_60g_{}.npy".format(input_len), history.history)
 
 train()
-
